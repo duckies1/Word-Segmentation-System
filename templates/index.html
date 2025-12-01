@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Drawing Inference</title>
+    <style>
+      body {
+        text-align: center;
+        font-family: Arial, sans-serif;
+      }
+      canvas {
+        border: 2px solid black;
+        background: white;
+      }
+      button {
+        margin: 10px;
+        padding: 10px 20px;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      #result {
+        margin-top: 20px;
+        font-size: 18px;
+      }
+      #recognized {
+        font-weight: bold;
+        color: green;
+      }
+      #prediction {
+        font-weight: bold;
+        color: blue;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Draw Something</h1>
+    <canvas id="canvas" width="800" height="400"></canvas><br />
+    <button onclick="clearCanvas()">Clear</button>
+    <button onclick="sendForPrediction()">Infer</button>
+
+    <hr style="width: 80%; margin: 20px auto" />
+
+    <h2>Or upload an image</h2>
+    <input type="file" id="fileInput" accept="image/*" />
+    <button onclick="uploadFile()">Upload & Segment</button>
+
+    <div id="result">
+      <p id="recognized"></p>
+      <p id="prediction"></p>
+      <div>
+        <h3>Segmentation Visualization</h3>
+        <img
+          id="visimg"
+          alt="segmentation visualization"
+          style="max-width: 90%; border: 1px solid #ccc"
+        />
+      </div>
+      <!-- Detected words / boxes removed per user request -->
+    </div>
+
+    <script>
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+
+      // Fill canvas white initially
+      function fillWhite() {
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      fillWhite();
+
+      let drawing = false;
+      canvas.addEventListener("mousedown", startDrawing);
+      canvas.addEventListener("mouseup", stopDrawing);
+      canvas.addEventListener("mouseout", stopDrawing);
+      canvas.addEventListener("mousemove", draw);
+
+      function startDrawing(ev) {
+        drawing = true;
+        ctx.beginPath();
+        ctx.moveTo(ev.offsetX, ev.offsetY);
+      }
+      function stopDrawing() {
+        drawing = false;
+      }
+      function draw(ev) {
+        if (!drawing) return;
+        ctx.lineWidth = 2;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "black";
+        ctx.lineTo(ev.offsetX, ev.offsetY);
+        ctx.stroke();
+      }
+
+      function clearCanvas() {
+        fillWhite();
+      }
+
+      async function saveImage() {
+        const dataURL = canvas.toDataURL("image/png");
+        const resp = await fetch("/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: dataURL }),
+        });
+        const j = await resp.json();
+        if (j.message) alert(j.message);
+        else alert("Error: " + (j.error || "unknown"));
+      }
+
+      async function sendForPrediction() {
+        const dataURL = canvas.toDataURL("image/png");
+        const resp = await fetch("/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: dataURL }),
+        });
+        const j = await resp.json();
+        showResult(j);
+        // Debugging: show raw logs in console
+        console.log("raw:", j.raw);
+      }
+
+      async function uploadFile() {
+        const input = document.getElementById("fileInput");
+        if (!input.files || input.files.length === 0) {
+          alert("Please select a file first.");
+          return;
+        }
+        const file = input.files[0];
+        const form = new FormData();
+        form.append("file", file);
+
+        const resp = await fetch("/upload", {
+          method: "POST",
+          body: form,
+        });
+
+        const j = await resp.json();
+        showResult(j);
+        console.log("raw:", j.raw);
+      }
+
+      function showResult(j) {
+        if (!j) return;
+        // Paragraph (empty when OCR disabled)
+        if (j.paragraph !== undefined) {
+          document.getElementById("recognized").innerText =
+            "Recognized Paragraph: " + j.paragraph;
+        } else {
+          document.getElementById("recognized").innerText = "";
+        }
+
+        // We only display the recognized paragraph and the visualization.
+        document.getElementById("prediction").innerText = j.error
+          ? "Error: " + j.error
+          : "";
+
+        // Show segmentation visualization if available
+        if (j.visualization) {
+          document.getElementById("visimg").src = j.visualization;
+        } else {
+          document.getElementById("visimg").src = "";
+        }
+      }
+    </script>
+  </body>
+</html>
