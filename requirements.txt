@@ -1,0 +1,9 @@
+# Python version
+python==3.12.4
+
+# Core dependencies
+Flask==3.0.2
+opencv-python==4.9.0.80
+numpy==1.26.4
+Pillow==10.3.0
+Werkzeug==3.0.1
