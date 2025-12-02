@@ -10,6 +10,7 @@ import base64
 import io
 from PIL import Image
 import time
+import tempfile
 
 from CCA import extract_text_components_with_rotation  # your CCA segmentation function
 
@@ -29,11 +30,14 @@ PDF2IMAGE_AVAILABLE = False
 
 app = Flask(__name__, template_folder="templates")
 
-SAVE_PATH = r"E:\Programming\Projects\Para splitter\saved\words.png"
-TEMP_DIR = r"E:\Programming\DL\Project - Handwriting Detection\app\Handwriting detector\segments"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SAVE_DIR = os.path.join(BASE_DIR, "saved")
+SAVE_PATH = os.path.join(SAVE_DIR, "words.png")
+TEMP_DIR = os.path.join(SAVE_DIR, "segments")
 
+# Ensure local save directories exist (container-writable paths)
 os.makedirs(TEMP_DIR, exist_ok=True)
-os.makedirs(os.path.dirname(SAVE_PATH), exist_ok=True)  
+os.makedirs(SAVE_DIR, exist_ok=True)
 
 # ----------------- UTILS -----------------
 def save_canvas_to_path(data_url: str, out_path: str):
@@ -63,12 +67,18 @@ def process(input_img_path, row_divisions=10, base_radius=1):
       - read grayscale -> binarize -> segment -> run HTR on each word
     Returns: dict with words list, paragraph string and debug raw logs (concatenated).
     """
-    # read
+    # If caller passed a path, load; otherwise process will be handled by
+    # the helper `_process_from_gray` when passed an array.
     img_gray = cv2.imread(input_img_path, cv2.IMREAD_GRAYSCALE)
     if img_gray is None:
         return {"error": "Could not read image file."}
-    img_gray = cv2.resize(img_gray, (0,0), fx=0.4, fy=0.4)
 
+    return _process_from_gray(img_gray, row_divisions=row_divisions, base_radius=base_radius)
+
+
+def _process_from_gray(img_gray, row_divisions=10, base_radius=1):
+    """Process a grayscale numpy image (uint8) and return the segmentation result."""
+    img_gray = cv2.resize(img_gray, (0, 0), fx=0.4, fy=0.4)
     # binarize for segmentation
     img_dilated = binarize_for_segmentation(img_gray)
 
@@ -82,24 +92,26 @@ def process(input_img_path, row_divisions=10, base_radius=1):
 
     # visualization (image with drawn boxes) encoded as a data URL so the
     # frontend can display segmentation results.
-    words_out, results = [], []
+    results = []
     vis = cv2.cvtColor(img_gray.copy(), cv2.COLOR_GRAY2BGR)
     for idx, (_, x, y, w, h) in enumerate(boxes, 1):
-        # Crop the word image and save for inspection (optional)
-        word_img = img_dilated[y:y+h, x:x+w]
-        word_img = np.pad(word_img, ((10, 10), (7, 7)), mode='constant', constant_values=255)
-        word_path = os.path.join(TEMP_DIR, f"word_{idx}.png")
-        try:
-            cv2.imwrite(word_path, word_img)
-        except Exception:
-            pass
-
-        # draw rectangle on visualization
+        # draw rectangle on visualization (do not save per-word images to disk)
         cv2.rectangle(vis, (x, y), (x + w, y + h), (0, 255, 0), 2)
         cv2.putText(vis, str(idx), (x, max(0, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-        # placeholder entry for each detected word
+        # placeholder entry for each detected word (no saved image)
         results.append({"id": idx, "box": [int(x), int(y), int(w), int(h)], "word": ""})
+
+    # encode visualization to base64 data URL
+    try:
+        _, png = cv2.imencode('.png', vis)
+        b64 = base64.b64encode(png.tobytes()).decode('ascii')
+        data_url = f"data:image/png;base64,{b64}"
+    except Exception:
+        data_url = None
+
+    paragraph = ""  # no OCR performed
+    return {"words": results, "paragraph": paragraph, "visualization": data_url, "boxes": boxes}
 
     # encode visualization to base64 data URL
     try:
@@ -133,29 +145,38 @@ def upload_document():
 
     filename = file.filename
     fname_lower = filename.lower()
-    save_path = os.path.join(TEMP_DIR, f"upload_{os.getpid()}_{filename}")
-    file.save(save_path)
 
     # If PDF, convert first page to image (requires pdf2image)
     if fname_lower.endswith(".pdf"):
+        # For PDF uploads we need to write the bytes briefly so pdf2image can read them.
         if not PDF2IMAGE_AVAILABLE:
             return jsonify({"error": "PDF support requires pdf2image and poppler. Install pdf2image and poppler."}), 500
         try:
-            # Convert first page to PIL image
-            pages = convert_from_path(save_path, dpi=200, first_page=1, last_page=1)
+            # write to a system temporary file so we don't hit container dir perms
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmpf:
+                tmp_path = tmpf.name
+            # save uploaded bytes into tmp_path
+            file.save(tmp_path)
+            pages = convert_from_path(tmp_path, dpi=200, first_page=1, last_page=1)
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
             if len(pages) == 0:
                 return jsonify({"error": "PDF conversion failed (no pages)"}), 500
             pil_img = pages[0].convert("RGB")
-            img_path = os.path.join(TEMP_DIR, f"upload_{os.getpid()}_page0.png")
-            pil_img.save(img_path)
+            # process in-memory from PIL image
+            result = _process_from_gray(cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2GRAY), row_divisions=10, base_radius=11)
+            return jsonify(result)
         except Exception as e:
             return jsonify({"error": f"PDF conversion failed: {e}"}), 500
     else:
-        # assume image file -> standardize to PNG (read via PIL to be robust)
+        # Read the uploaded image from the request stream (do not write to segments dir)
         try:
-            pil_img = Image.open(save_path).convert("RGB")
-            img_path = os.path.join(TEMP_DIR, f"upload_{os.getpid()}_img.png")
-            pil_img.save(img_path)
+            pil_img = Image.open(file.stream).convert("RGB")
+            # process in-memory from PIL image
+            result = _process_from_gray(cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2GRAY), row_divisions=10, base_radius=11)
+            return jsonify(result)
         except Exception as e:
             return jsonify({"error": f"Could not read uploaded image: {e}"}), 400
 
@@ -197,4 +218,4 @@ def save_image():
         return jsonify({"error": f"Failed to save image: {e}"}), 500
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, host = '0.0.0.0', port = 8080)
