@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-def compute_adaptive_radii_rotated(img, base_radius=5, row_height=100, alpha=15.0, beta=7.0):
+def compute_adaptive_radii_rotated(img, base_radius=5, row_height=100, alpha=10.0, beta=7.0):
     """
     Compute adaptive radii on the image AFTER rotating clockwise 90°.
     Returns radii_per_row for the rotated image coordinate frame and the rotated binary image.
@@ -56,6 +56,10 @@ def connected_components_adaptive_plus_rotated(rot_bin_img, radii_per_row, base_
     """
     Run adaptive-ellipse CCA on an image that is already rotated clockwise.
     Returns labels (same shape as rot_bin_img) and number of labels.
+
+    Note: radii_per_row contains (y0, y1, a, b) computed in rotated-frame logic.
+    To compensate for the 90° rotation (so the ellipse elongation follows the original
+    text-horizontal direction), we use the swapped ellipse (b, a) when creating offsets.
     """
     bin_img = (rot_bin_img > 0).astype(np.uint8)
     H, W = bin_img.shape
@@ -63,22 +67,31 @@ def connected_components_adaptive_plus_rotated(rot_bin_img, radii_per_row, base_
     current_label = 0
 
     # Precompute ellipse offsets for all (a,b) combos in radii_per_row
+    # Store both (a,b) and their swapped (b,a) variants; we'll use (b,a) for growth.
     ellipse_masks = {}
     for _, _, a, b in radii_per_row:
-        key = (int(a), int(b))
-        if key not in ellipse_masks:
-            ellipse_masks[key] = make_ellipse_offsets(*key)
+        key_ab = (int(a), int(b))
+        key_ba = (int(b), int(a))
+        if key_ab not in ellipse_masks:
+            ellipse_masks[key_ab] = make_ellipse_offsets(*key_ab)
+        if key_ba not in ellipse_masks:
+            ellipse_masks[key_ba] = make_ellipse_offsets(*key_ba)
 
+    # Ensure default offsets exists (also keep swapped default)
     default_key = (base_radius, base_radius)
+    swapped_default_key = (base_radius, base_radius)  # same if square; kept for clarity
     if default_key not in ellipse_masks:
         ellipse_masks[default_key] = make_ellipse_offsets(*default_key)
-    default_offsets = ellipse_masks[default_key]
+    if swapped_default_key not in ellipse_masks:
+        ellipse_masks[swapped_default_key] = make_ellipse_offsets(*swapped_default_key)
+    # Default offsets we will use (swapped orientation)
+    default_offsets = ellipse_masks[swapped_default_key]
 
     def offsets_for_y(y):
-        # find the (a,b) for this rotated-row y
+        # find the (a,b) for this rotated-row y and return the *swapped* offsets (b,a)
         for y0, y1, a, b in radii_per_row:
             if y0 <= y < y1:
-                return ellipse_masks[(int(a), int(b))]
+                return ellipse_masks[(int(b), int(a))]  # swapped here
         return default_offsets
 
     # flood-fill: mark label when pushing to avoid duplicates
@@ -100,6 +113,7 @@ def connected_components_adaptive_plus_rotated(rot_bin_img, radii_per_row, base_
                                 stack.append((ny, nx))
 
     return labels, current_label
+
 
 
 
