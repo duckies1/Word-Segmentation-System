@@ -1,3 +1,5 @@
 tester.ipynb
 README.Docker.md
 .dockerignore
+__pycache__/
+*.pyc
