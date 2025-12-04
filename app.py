@@ -57,7 +57,7 @@ def binarize_for_segmentation(img_gray):
     img_gray = cv2.fastNlMeansDenoising(img_gray, val, 20, 7, 21)
     gray = cv2.adaptiveThreshold(img_gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 5, 20)
     print(f"Time Taken for resize + thresholding: {time.time() - start}")
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 2))  # wider horizontally
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3))  # wider horizontally
     img_dilated = cv2.dilate(gray, kernel, iterations=1)
     return img_dilated
 
