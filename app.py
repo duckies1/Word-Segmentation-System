@@ -29,6 +29,7 @@ except Exception:
 PDF2IMAGE_AVAILABLE = False
 
 app = Flask(__name__, template_folder="templates")
+app.config['DEBUG'] = os.getenv('DEBUG', 'False') == 'True'
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SAVE_DIR = os.path.join(BASE_DIR, "saved")

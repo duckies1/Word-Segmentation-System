@@ -3,3 +3,4 @@ README.Docker.md
 .dockerignore
 __pycache__/
 *.pyc
+.env
