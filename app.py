@@ -14,6 +14,16 @@ import tempfile
 
 from CCA import extract_text_components_with_rotation  # your CCA segmentation function
 
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+
+logger = logging.getLogger("wss")
+
+
 # Optional PDF handling: pdf2image (requires poppler).
 # To enable PDF -> image conversion:
 #   pip install pdf2image
@@ -57,7 +67,12 @@ def binarize_for_segmentation(img_gray):
     start = time.time()
     img_gray = cv2.fastNlMeansDenoising(img_gray, val, 20, 7, 21)
     gray = cv2.adaptiveThreshold(img_gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 5, 20)
-    print(f"Time Taken for resize + thresholding: {time.time() - start}")
+    # print(f"Time Taken for resize + thresholding: {time.time() - start}")
+    logger.info(
+        "thresholding_complete",
+        extra={"time_sec": round(time.time() - start, 4)}
+    )
+
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 3))  # wider horizontally
     img_dilated = cv2.dilate(gray, kernel, iterations=1)
     return img_dilated
@@ -89,7 +104,15 @@ def _process_from_gray(img_gray, row_divisions=10, base_radius=1):
     # Segment into word bounding boxes
     start = time.time()
     boxes, _ = extract_text_components_with_rotation(img_dilated, row_height=row_height, base_radius=base_radius)
-    print(f"Segmentation found {len(boxes)} boxes in {time.time() - start:.2f}s")
+    # print(f"Segmentation found {len(boxes)} boxes in {time.time() - start:.2f}s")
+    logger.info(
+    "segmentation_complete",
+    extra={
+            "boxes": len(boxes),
+            "time_sec": round(time.time() - start, 4)
+        }
+    )
+
 
     # visualization (image with drawn boxes) encoded as a data URL so the
     # frontend can display segmentation results.
@@ -138,6 +161,7 @@ def upload_document():
       - images: png, jpg, jpeg, bmp, tiff
       - pdf: first page will be converted to image if pdf2image + poppler are available
     """
+    logger.info("upload_request_received")
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
     file = request.files['file']
@@ -146,6 +170,7 @@ def upload_document():
 
     filename = file.filename
     fname_lower = filename.lower()
+    logger.info("file_received", extra={"uploaded_filename": filename})
 
     # If PDF, convert first page to image (requires pdf2image)
     if fname_lower.endswith(".pdf"):
@@ -169,8 +194,10 @@ def upload_document():
             # process in-memory from PIL image
             result = _process_from_gray(cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2GRAY), row_divisions=10, base_radius=11)
             return jsonify(result)
-        except Exception as e:
-            return jsonify({"error": f"PDF conversion failed: {e}"}), 500
+        except Exception:
+            logger.exception("upload_processing_failed")
+        # except Exception as e:
+        #     return jsonify({"error": f"PDF conversion failed: {e}"}), 500
     else:
         # Read the uploaded image from the request stream (do not write to segments dir)
         try:
@@ -178,8 +205,10 @@ def upload_document():
             # process in-memory from PIL image
             result = _process_from_gray(cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2GRAY), row_divisions=10, base_radius=11)
             return jsonify(result)
-        except Exception as e:
-            return jsonify({"error": f"Could not read uploaded image: {e}"}), 400
+        # except Exception as e:
+        #     return jsonify({"error": f"Could not read uploaded image: {e}"}), 400
+        except Exception:
+            logger.exception("could not read uploaded image")
 
     # process the image path
     result = process(img_path, row_divisions=10, base_radius=11)
@@ -200,8 +229,10 @@ def predict_paragraph():
     # Save the canvas to the configured SAVE_PATH
     try:
         save_canvas_to_path(data, SAVE_PATH)
-    except Exception as e:
-        return jsonify({"error": f"Failed to save image: {e}"}), 500
+    # except Exception as e:
+    #     return jsonify({"error": f"Failed to save image: {e}"}), 500
+    except Exception:
+        logger.exception("failed to save image")
 
     # Run the same processing pipeline as the upload endpoint
     result = process(SAVE_PATH, row_divisions=10, base_radius=11)
@@ -215,8 +246,10 @@ def save_image():
     try:
         save_canvas_to_path(data, SAVE_PATH)
         return jsonify({"message": f"Image saved at {SAVE_PATH}"})
-    except Exception as e:
-        return jsonify({"error": f"Failed to save image: {e}"}), 500
+    except Exception:
+        logger.exception("failed to save image")
+    # except Exception as e:
+        # return jsonify({"error": f"Failed to save image: {e}"}), 500
 
 if __name__ == "__main__":
-    app.run(debug=True, host = '0.0.0.0', port = 8080)
+    app.run(host = '0.0.0.0', port = 8080)
