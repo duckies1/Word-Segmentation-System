@@ -1,0 +1,18 @@
+version: '3'
+services:
+  server:
+    build:
+      context: .
+    ports:
+      - "8080:8080"
+    restart: always
+    environment:
+      - FLASK_ENV=production
+      - DEBUG=False
+    volumes:
+      - /data/para-splitter/saved:/app/saved  # persistent storage
+    logging:
+      driver: "awslogs"
+      options:
+        awslogs-group: "/ecs/para-splitter"
+        awslogs-region: "ap-southeast-2"
