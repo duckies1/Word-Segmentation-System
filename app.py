@@ -251,5 +251,9 @@ def save_image():
     # except Exception as e:
         # return jsonify({"error": f"Failed to save image: {e}"}), 500
 
+@app.route('/health')
+def health():
+    return jsonify({"status": "healthy"}), 200
+
 if __name__ == "__main__":
     app.run(host = '0.0.0.0', port = 8080)

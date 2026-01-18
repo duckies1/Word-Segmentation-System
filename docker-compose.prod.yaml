@@ -9,10 +9,15 @@ services:
     environment:
       - FLASK_ENV=production
       - DEBUG=False
-    volumes:
-      - /data/para-splitter/saved:/app/saved  # persistent storage
+    # volumes:
+    #   - /data/word-segmentation-system/saved:/app/saved  # persistent storage
+    # logging:
+    #   driver: "awslogs"
+    #   options:
+    #     awslogs-group: "/ecs/word-segmentation-system"
+    #     awslogs-region: "ap-southeast-2"
     logging:
-      driver: "awslogs"
+      driver: "json-file"
       options:
-        awslogs-group: "/ecs/para-splitter"
-        awslogs-region: "ap-southeast-2"
+        max-size: "10m"
+        max-file: "3"
